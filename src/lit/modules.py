@@ -1,0 +1,46 @@
+"""LightningModules : enveloppent les architectures de models sans les modifier."""
+
+from __future__ import annotations
+
+import lightning.pytorch as pl
+import torch
+from torch import nn
+
+from models import build_autoencoder
+
+
+class AutoencoderModule(pl.LightningModule):
+    """AE : MSE de reconstruction, Adam.
+
+    Métriques TensorBoard : loss/train_step, loss/train_epoch, loss/val.
+    """
+
+    def __init__(self, config: dict):
+        super().__init__()
+        self.save_hyperparameters()  # config complète -> hparams TensorBoard + checkpoint
+        self.config = config
+        self.model = build_autoencoder(config["model"])
+        self.criterion = nn.MSELoss()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
+    def _loss(self, batch, stage: str) -> tuple[torch.Tensor, int]:
+        x = batch[0]
+        return self.criterion(self.model(x), x), x.size(0)
+
+    def training_step(self, batch, batch_idx):
+        loss, bs = self._loss(batch, "train")
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=bs)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, bs = self._loss(batch, "val")
+        self.log("loss/val", loss, on_epoch=True, prog_bar=True, batch_size=bs)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.model.parameters(), lr=self.config["train"].get("lr", 1e-3))
+
+
+def build_module(config: dict) -> pl.LightningModule:
+    return AutoencoderModule(config)

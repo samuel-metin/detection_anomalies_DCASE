@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environnements
+.venv/
+venv/
+env/
+
+# Tests / outils
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Données : sons DCASE et log-mel produits par prepare_data.py
+data/
+
+# Sorties (modèles, figures) — on garde seulement le dossier
+outputs/*
+!outputs/.gitkeep
+lightning_logs/
+*.pt
+*.pth
+*.ckpt
+
+# Éditeurs / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Instructions locales de Claude Code (non versionnées)
+CLAUDE.md
+.claude/

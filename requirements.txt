@@ -1,0 +1,18 @@
+# Pour CUDA, installer torch/torchaudio depuis https://pytorch.org/get-started/locally/
+# Entraînement
+torch>=2.0
+torchaudio>=2.0
+lightning>=2.1
+tensorboard>=2.12
+pyyaml>=6.0
+numpy>=1.23
+scipy>=1.9
+
+# Tests
+pytest>=7.0
+
+# Notebook d'évaluation
+pandas>=1.5
+matplotlib>=3.6
+scikit-learn>=1.2
+ipykernel

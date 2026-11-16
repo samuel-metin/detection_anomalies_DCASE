@@ -1,0 +1,24 @@
+# Auto-encodeur (AE) de la baseline DCASE 2020 Task 2 (Koizumi et al., 2020), entraîné par MSE.
+model:
+  name: ae
+  input_shape: 640          # 5 trames log-mel de 128 bandes
+  hidden_shapes: [128, 128, 128, 128]   # encodeur 640 -> 128 x 4 -> 8 ; décodeur symétrique -> 640
+  latent_shape: 8
+
+data:
+  root: data/pump           # train/normal/ et val/normal/ (log-mel .npy), créés par prepare_data.py
+  n_frames: 5               # trames concaténées par vecteur : 128 bandes x 5 = 640 = model.input_shape
+  batch_size: 512
+  shuffle: true
+
+train:
+  epochs: 100
+  lr: 0.001
+
+trainer:                    # arguments passés tels quels à lightning.pytorch.Trainer
+  log_every_n_steps: 50     # fréquence des courbes "_step" dans TensorBoard
+  check_val_every_n_epoch: 1
+
+seed: 0
+device: auto                # auto | cpu | cuda | cuda:0 ...
+output_dir: outputs
