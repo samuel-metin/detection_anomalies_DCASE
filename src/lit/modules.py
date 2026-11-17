@@ -20,8 +20,8 @@ class AutoencoderModule(pl.LightningModule):
         self.config = config
         self.model = build_autoencoder(config["model"])
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+    def forward(self, x: torch.Tensor, *ids: torch.Tensor) -> torch.Tensor:
+        return self.model(x, *ids)  # ids éventuels : modèles conditionnés par l'ID de la machine
 
     def on_fit_start(self):
         # Statistiques calculées une fois sur tout le train (normalisation…), pour les modèles qui en ont besoin

@@ -5,7 +5,7 @@ import pytest
 import torch
 from scipy.io import wavfile
 
-from data import N_MELS, get_train_val, load_vectors, load_wav, logmel, to_vectors
+from data import N_MELS, get_train_val, load_vectors, load_wav, logmel, machine_id, to_vectors
 from utils import ConfigError
 
 
@@ -45,3 +45,18 @@ def test_get_train_val(fake_data):
     train, val = get_train_val({"root": str(fake_data)})
     assert (len(train), len(val)) == (64, 32)
     assert train[0][0].shape == (640,)
+
+
+def test_machine_id():
+    assert machine_id("normal_id_04_00000012") == 4
+    with pytest.raises(ValueError):
+        machine_id("sans_identifiant")
+
+
+def test_get_train_val_with_ids(fake_data):
+    train, val = get_train_val({"root": str(fake_data), "with_ids": True})
+    assert (len(train), len(val)) == (64, 32)
+    x, ids = train.tensors
+    assert x.shape == (64, 640) and ids.dtype == torch.long
+    assert ids.tolist() == [0] * 32 + [2] * 32  # 2 sons de chaque machine, dans l'ordre des fichiers
+    assert torch.equal(x, get_train_val({"root": str(fake_data)})[0].tensors[0])
