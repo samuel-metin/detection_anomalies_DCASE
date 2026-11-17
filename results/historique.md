@@ -13,3 +13,5 @@
 | idnn/B-128x3-16-f7-30 | IDNN 128x3, goulot 16, 7 trames, 30 ep | 74.39 | 60.99 | moins bon |
 | ae_plus/A-256-16-30ep | ae_plus normalisé, couches 256x4, goulot 16 (30 ep) | 73.36 | 61.02 | moins bon |
 | cae/C-kapka-30 | CAE FiLM + mauvais ID -> cible 0 (Kapka, poids 0.25), 30 ep | 28.89 | 48.46 | moins bon |
+| cae/C-concat-30-seed1 | CAE concat, 30 ep, seed 1 (confirmation) | 76.39 | 65.89 | équivalent (±1 pt, bruit entre seeds) |
+| cae/C-film-30-seed1 | CAE film, 30 ep, seed 1 (confirmation) | 73.74 | 60.98 | moins bon |

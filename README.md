@@ -11,8 +11,13 @@ Condition Monitoring*) :
 
 1. `prepare_data.py` transforme les sons d'un type de machine (par défaut la **pompe**) en log-mel ;
 2. `train.py` entraîne l'auto-encodeur (AE) de la baseline sur les sons normaux, et sauvegarde le modèle ;
-3. le notebook `notebooks/evaluation.ipynb` calcule les métriques du papier (AUC et pAUC par machine) sur le jeu
-   de test, et permet d'écouter et d'examiner n'importe quel son.
+3. `evaluate_run.py` écrit un résumé court du run (AUC / pAUC par machine) dans `results/summary.md` et une
+   ligne dans `results/historique.md` ;
+4. le notebook `notebooks/evaluation.ipynb` calcule les métriques du papier (AUC et pAUC par machine) sur le jeu
+   de test, des scores plus performants (`maha`, `knn`), et permet d'écouter et d'examiner n'importe quel son.
+
+En plus de la baseline (`ae`), le projet propose un auto-encodeur **conditionné par l'ID de la machine** (`cae`),
+voir [Améliorations](#améliorations).
 
 ## Données
 
@@ -58,6 +63,32 @@ machine) et contient son log-mel `(128 bandes, 313 trames)`.
 Écarts assumés : les log-mel sont calculés avec torchaudio, réglé comme librosa (fenêtres centrées, échelle et
 normalisation « slaney ») ; la validation est un tirage aléatoire de 10 % des **sons** (la baseline Keras prend
 les 10 derniers % des vecteurs, donc presque uniquement la dernière machine).
+
+## Améliorations
+
+| Modèle | Score | AUC | pAUC |
+|--------|-------|-----|------|
+| `ae` (baseline, 100 epochs) | `mse` (papier) | 72.85 | 59.41 |
+| `ae` (baseline, 100 epochs) | `maha` | 85.3 | 65.8 |
+| `cae` (30 epochs) | `mse` | 76.1 | 65.4 |
+| **`cae` (30 epochs)** | **`maha`** | **87.1** | **71.3** |
+
+Pompe, moyenne des 4 machines. Lignes `cae` : moyenne de deux entraînements (seeds 0 et 1), très proches
+(`maha` : 87.0 et 87.2 d'AUC).
+
+- **`cae`** (`configs/cae.yaml`) : l'AE de la baseline, dont le décodeur reçoit le code latent concaténé au
+  one-hot de l'ID de la machine (id_04 -> 4). Un seul modèle pour toutes les machines, mais il sait de laquelle
+  vient le son. Les ID sont lus dans le nom des fichiers (`data.with_ids: true`).
+- **`maha`** (notebook) : distance de Mahalanobis du vecteur d'erreur moyen `x - x̂` d'un son à ceux des sons
+  normaux d'entraînement de la même machine. **`knn`** : distance au plus proche son d'entraînement dans l'espace
+  latent. Ces scores ont été choisis en regardant le test de la pompe : leur gain reste à confirmer ailleurs.
+- Essayés sans gain net : normalisation des entrées, débruitage, réseau plus large, IDNN (prédiction de la trame
+  centrale), conditionnement FiLM, variante de Kapka (mauvais ID pénalisé). L'historique complet des essais est dans `results/historique.md`.
+
+```bash
+python train.py --config configs/cae.yaml --epochs 30 --run-name cae
+python evaluate_run.py outputs/cae/cae --change "cae, 30 epochs"
+```
 
 ## Installation
 
@@ -137,7 +168,8 @@ model.load_state_dict(ckpt["model_state"])
 Le notebook `notebooks/evaluation.ipynb` charge un `model.pt` (par défaut le plus récent de `outputs/`), lit les
 log-mel de `val/` et `test/` du jeu de données de sa config, et analyse la détection :
 
-- score par son : `mse`, erreur de reconstruction moyenne (score du papier) ;
+- scores par son : `mse`, erreur de reconstruction moyenne (score du papier), et `maha` / `knn`, estimés sur les
+  sons normaux de `train/` par machine ;
 - **AUC** et **pAUC** par machine et en moyenne, à côté des résultats de la baseline officielle ;
 - courbes ROC, distribution des scores ; en complément, rappel et faux positifs au seuil (quantile des scores de
   validation) ;
@@ -155,10 +187,11 @@ Dans VS Code, choisir le noyau `.venv`.
 .
 ├── prepare_data.py      # sons WAV -> log-mel (.npy) rangés en train / val / test
 ├── train.py             # script d'entraînement (CLI)
-├── configs/             # ae.yaml
+├── evaluate_run.py      # résumé d'un run -> results/summary.md, results/historique.md
+├── configs/             # ae.yaml (baseline), cae.yaml (conditionné par l'ID)
 ├── src/
 │   ├── data.py          # log-mel et vecteurs de 5 trames (réglages du papier), lecture des .npy
-│   ├── models.py        # Encoder, Decoder, AE de la baseline
+│   ├── models.py        # Encoder, Decoder, AE de la baseline, CAE
 │   ├── lit/             # entraînement Lightning
 │   │   ├── datamodule.py    # FeatureDataModule (train, validation)
 │   │   ├── modules.py       # AutoencoderModule
@@ -168,6 +201,7 @@ Dans VS Code, choisir le noyau `.venv`.
 ├── tests/               # tests unitaires (pytest)
 ├── notebooks/
 │   └── evaluation.ipynb # évaluation : métriques du papier, figures, écoute et test de sons
+├── results/             # summary.md, historique.md, rapport_final.md
 ├── data/                # dcase2020/ (sons) et log-mel par machine (non versionnés)
 └── outputs/             # runs d'entraînement (non versionnés)
 ```
@@ -186,6 +220,5 @@ bout.
 ## Pistes
 
 - Les autres types de machines (`fan`, `slider`, `valve`, `ToyCar`, `ToyConveyor`), sur la même base.
-- Score dans l'espace latent : distance de Mahalanobis ou densité (GMM) des codes, par machine.
 - Méthodes de référence simples : ACP en reconstruction, plus proche voisin sur les log-mel.
 - Approches plus récentes du challenge : classification des ID de machine (les sons mal classés sont suspects).

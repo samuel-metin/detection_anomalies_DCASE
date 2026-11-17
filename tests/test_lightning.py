@@ -86,7 +86,6 @@ def test_model_pt_reloads_without_lightning(fake_data, tmp_path):
 
 def test_fit_cae_with_ids(fake_data, tmp_path):
     cfg = small_config(tmp_path, model="cae")
-    cfg["model"]["wrong_id_weight"] = 0.5
     dm = FeatureDataModule(cfg["data"])
     dm.setup("fit")
     vectors, ids = next(iter(dm.train_dataloader()))

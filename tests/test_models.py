@@ -53,32 +53,16 @@ def test_build_autoencoder_unknown_name():
 IDS = torch.tensor([0, 2, 4, 6, 0, 2, 4, 6])
 
 
-@pytest.mark.parametrize("conditioning", ["film", "concat"])
-def test_cae_uses_machine_id(batch, conditioning):
-    model = CAE(640, [32, 16], 4, conditioning=conditioning)
-    if conditioning == "film":  # à l'initialisation, FiLM est l'identité : on le perturbe
-        torch.nn.init.normal_(model.scale.weight)
-    model.eval()
+def test_cae_uses_machine_id(batch):
+    model = CAE(640, [32, 16], 4).eval()
     with torch.no_grad():
         assert model(batch, IDS).shape == (8, 640)
         assert torch.allclose(model(batch), model(batch, torch.zeros(8, dtype=torch.long)))  # sans ids : ID 0
         assert not torch.allclose(model(batch, IDS), model(batch, IDS + 1))
         assert torch.allclose(model.error(batch, IDS), ((model(batch, IDS) - batch) ** 2).mean(dim=1))
-        assert model.eval()(batch[:1], IDS[:1]).shape == (1, 640)
-
-
-def test_cae_wrong_id_term_only_in_training(batch):
-    model = CAE(640, [32, 16], 4, wrong_id_weight=1.0, wrong_id_target=100.0)
-    plain = ((model(batch, IDS) - batch) ** 2).mean(dim=1)
-    err = model.error(batch, IDS)  # + (sortie - 100)² pour les vecteurs qui ont reçu un mauvais ID
-    assert (err >= plain - 1e-4).all() and (err > plain + 1000).any()
-    model.eval()
-    with torch.no_grad():
-        assert torch.allclose(model.error(batch, IDS), ((model(batch, IDS) - batch) ** 2).mean(dim=1))
+        assert model(batch[:1], IDS[:1]).shape == (1, 640)
 
 
 def test_build_cae():
-    model = build_autoencoder({"name": "cae", "hidden_shapes": [64, 32], "latent_shape": 4, "conditioning": "concat"})
+    model = build_autoencoder({"name": "cae", "hidden_shapes": [64, 32], "latent_shape": 4})
     assert type(model) is CAE and model.decoder.hidden[0].in_features == 4 + 8
-    with pytest.raises(ValueError):
-        CAE(conditioning="inconnu")

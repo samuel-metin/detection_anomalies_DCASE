@@ -1,14 +1,12 @@
 # Auto-encodeur conditionné par l'ID de la machine (CAE, idée de Kapka, 2020) : l'AE de la baseline, dont le
-# décodeur reçoit l'ID de la machine (id_04 -> 4). Un seul modèle pour toutes les machines du type.
+# décodeur reçoit le code latent concaténé au one-hot de l'ID de la machine (id_04 -> 4).
+# Un seul modèle pour toutes les machines du type.
 model:
   name: cae
   input_shape: 640          # 5 trames log-mel de 128 bandes
   hidden_shapes: [128, 128, 128, 128]   # comme l'AE de la baseline
   latent_shape: 8
   n_ids: 8                  # ID possibles : 0 à 7 (pompe : 0, 2, 4, 6)
-  conditioning: film        # film (z * échelle[id] + décalage[id]) | concat (z + one-hot de l'ID)
-  wrong_id_weight: 0.0      # > 0 : variante de Kapka, un mauvais ID doit donner wrong_id_target
-  wrong_id_target: 0.0
 
 data:
   root: data/pump           # train/normal/ et val/normal/ (log-mel .npy), créés par prepare_data.py

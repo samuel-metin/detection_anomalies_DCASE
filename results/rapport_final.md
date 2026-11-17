@@ -94,11 +94,25 @@ Les paramètres de ces scores sont estimés sur les sons normaux de `train/`, ja
 `ae_plus/A-norm-100ep` (epoch 1) et `idnn/B-128x3-16-100` (epoch 11) se sont arrêtés à la fin des agents, sans
 `model.pt`. Ils sont conservés dans `outputs/`.
 
-## Prochaines étapes proposées
+## Étapes réalisées ensuite (choix final)
 
-1. **Fusionner** C (`cae`), D (scores `maha` et `knn`) et B (`idnn`) dans `ameliorations`. A reste sur sa
-   branche.
-2. **Combiner les deux gains** : appliquer le score `maha` au `cae`.
-3. **Confirmer** les meilleurs modèles avec 2 seeds, puis sur 100 epochs, quand ce sera voulu.
-4. **Vérifier sur une autre machine** (fan, valve…) que les gains ne sont pas propres à la pompe, ce qui
-   limiterait le risque d'avoir sur-ajusté au test.
+- **Fusion** : seules les pistes C (`cae`) et D (scores `maha` et `knn`) sont gardées dans `ameliorations`.
+  Les branches des pistes A et B, et les worktrees, sont supprimés. Les runs restent dans `outputs/`.
+- **Correction du notebook** : il passe maintenant l'ID de chaque son au modèle. Sans cette correction, le
+  `cae` aurait reconstruit tous les sons avec l'ID 0. Pour cela, `forward(x, ids=None)` est commun à tous
+  les modèles.
+- **Combinaison `cae` + `maha`** et **confirmation avec une 2e seed** (30 epochs) :
+
+| Run | AUC mse | pAUC mse | AUC maha | pAUC maha | AUC knn | pAUC knn |
+|---|---|---|---|---|---|---|
+| cae concat, seed 0 | 75.77 | 64.90 | 87.04 | 71.33 | 77.51 | 60.95 |
+| cae concat, seed 1 | 76.39 | 65.89 | 87.22 | 71.32 | 76.57 | 60.34 |
+| cae FiLM, seed 0 | 75.16 | 63.20 | 86.60 | 69.98 | 82.52 | 68.74 |
+| cae FiLM, seed 1 | 73.74 | 60.98 | 86.25 | 68.84 | 81.32 | 65.95 |
+| ae baseline (100 ep) | 72.85 | 59.41 | 85.3 | 65.8 | 83.3 | 73.2 |
+
+- **Choix final : `cae` concat + score `maha`, 87.1 AUC / 71.3 pAUC** (moyenne des 2 seeds). C'est le
+  meilleur résultat, et il est stable entre seeds. FiLM est moins stable, et la variante de Kapka échoue. Ces
+  deux variantes sont retirées du code : `CAE` n'a plus que le conditionnement par concaténation. Les runs
+  FiLM et Kapka ne sont plus rechargeables, mais ils sont conservés dans `outputs/`.
+- Pas de nouvel entraînement de 100 epochs, ni d'essai sur une autre machine (choix de l'utilisateur).
