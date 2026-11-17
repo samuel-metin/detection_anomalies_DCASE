@@ -10,7 +10,7 @@ L'analyse détaillée (autres scores, figures, écoute) reste dans notebooks/eva
 
 Exemples :
     python evaluate_run.py outputs/ae/pump --change "baseline du papier"
-    python evaluate_run.py outputs/ae_plus/essai/checkpoints/model.pt --change "entrées normalisées"
+    python evaluate_run.py outputs/cae/cae/checkpoints/model.pt --change "cae, 30 epochs"
 """
 
 from __future__ import annotations

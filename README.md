@@ -82,8 +82,7 @@ Pompe, moyenne des 4 machines. Lignes `cae` : moyenne de deux entraînements (se
 - **`maha`** (notebook) : distance de Mahalanobis du vecteur d'erreur moyen `x - x̂` d'un son à ceux des sons
   normaux d'entraînement de la même machine. **`knn`** : distance au plus proche son d'entraînement dans l'espace
   latent. Ces scores ont été choisis en regardant le test de la pompe : leur gain reste à confirmer ailleurs.
-- Essayés sans gain net : normalisation des entrées, débruitage, réseau plus large, IDNN (prédiction de la trame
-  centrale), conditionnement FiLM, variante de Kapka (mauvais ID pénalisé). L'historique complet des essais est dans `results/historique.md`.
+- Chaque run est résumé par `evaluate_run.py` dans `results/summary.md` et `results/historique.md`.
 
 ```bash
 python train.py --config configs/cae.yaml --epochs 30 --run-name cae
@@ -214,8 +213,8 @@ pytest
 
 Les tests n'utilisent que des données factices (sons et log-mel aléatoires). Ils ne téléchargent rien et
 tournent sur CPU en quelques secondes. Ils couvrent les features (log-mel, vecteurs de 5 trames), la
-construction du jeu de données, l'architecture de la baseline, la config, l'entraînement Lightning (logs TensorBoard, checkpoints, `model.pt`) et `train.py` de bout en
-bout.
+construction du jeu de données, l'architecture de la baseline et du `cae`, la config, l'entraînement Lightning
+(logs TensorBoard, checkpoints, `model.pt`), `train.py` et `evaluate_run.py` de bout en bout.
 
 ## Pistes
 
