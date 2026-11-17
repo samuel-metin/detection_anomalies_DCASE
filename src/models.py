@@ -5,6 +5,8 @@ Architecture de la baseline (Koizumi et al., 2020), sur des vecteurs de 640 vale
     code    : 128 -> 8                              (Linear, BatchNorm, ReLU)
     Decoder : 8 -> 128 -> 128 -> 128 -> 128 -> 640  (Linear, BatchNorm, ReLU ; sortie linéaire)
 
+`CAE` : même AE, dont le décodeur reçoit aussi l'ID de la machine (config `data.with_ids: true`).
+
 Interface (callbacks d'entraînement, notebook d'évaluation) :
 - `encode(x)` renvoie le code latent ;
 - `forward(x)` vaut `decode(encode(x))` : la reconstruction ;
@@ -81,7 +83,62 @@ class AE(nn.Module):
         return ((self(x) - x) ** 2).mean(dim=1)
 
 
-MODELS = {"ae": AE}
+class CAE(AE):
+    """Auto-encodeur conditionné par l'ID de la machine (idée de Kapka, 2020) : un seul modèle pour toutes les
+    machines, mais le décodeur sait de quelle machine vient le son. Encodeur et goulot identiques à l'AE.
+
+    Conditionnement du code latent z par l'ID (`conditioning`) :
+    - "film" : z * échelle[id] + décalage[id] (Embedding, initialisés à 1 et 0) ;
+    - "concat" : z concaténé au one-hot de l'ID, en entrée du décodeur.
+
+    Variante de Kapka (`wrong_id_weight` > 0) : à l'entraînement, chaque vecteur est aussi décodé avec l'ID
+    d'un autre vecteur du batch ; quand cet ID diffère du vrai, la sortie doit valoir `wrong_id_target`
+    (constante). Le modèle doit donc vraiment utiliser l'ID. En évaluation, seul compte le vrai ID.
+    Sans ids (callbacks, notebook), l'ID 0 est utilisé.
+    """
+
+    def __init__(self, input_shape: int = 640, hidden_shapes: Sequence[int] = (128, 128, 128, 128),
+                 latent_shape: int = 8, n_ids: int = 8, conditioning: str = "film",
+                 wrong_id_weight: float = 0.0, wrong_id_target: float = 0.0):
+        super().__init__(input_shape, hidden_shapes, latent_shape)
+        self.n_ids = n_ids
+        self.conditioning = conditioning
+        self.wrong_id_weight = wrong_id_weight
+        self.wrong_id_target = wrong_id_target
+        if conditioning == "film":
+            self.scale = nn.Embedding(n_ids, latent_shape)
+            self.shift = nn.Embedding(n_ids, latent_shape)
+            nn.init.ones_(self.scale.weight)
+            nn.init.zeros_(self.shift.weight)
+        elif conditioning == "concat":
+            self.decoder = Decoder(latent_shape + n_ids, list(hidden_shapes), input_shape)
+        else:
+            raise ValueError(f"conditioning inconnu : {conditioning!r} (film, concat)")
+
+    def decode(self, z: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+        if ids is None:
+            ids = torch.zeros(z.size(0), dtype=torch.long, device=z.device)
+        if self.conditioning == "film":
+            z = z * self.scale(ids) + self.shift(ids)
+        else:
+            z = torch.cat([z, nn.functional.one_hot(ids, self.n_ids).to(z.dtype)], dim=1)
+        return self.decoder(z)
+
+    def forward(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+        return self.decode(self.encode(x), ids)
+
+    def error(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+        """MSE de reconstruction avec le vrai ID ; à l'entraînement, plus le terme des mauvais ID (Kapka)."""
+        z = self.encode(x)
+        err = ((self.decode(z, ids) - x) ** 2).mean(dim=1)
+        if self.training and self.wrong_id_weight > 0 and ids is not None:
+            wrong = ids[torch.randperm(ids.size(0), device=ids.device)]
+            err_wrong = ((self.decode(z, wrong) - self.wrong_id_target) ** 2).mean(dim=1)
+            err = err + self.wrong_id_weight * (wrong != ids) * err_wrong
+        return err
+
+
+MODELS = {"ae": AE, "cae": CAE}
 MODEL_NAMES = tuple(MODELS)
 
 

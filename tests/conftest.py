@@ -14,11 +14,11 @@ N_TRAMES = 20  # trames par log-mel factice -> 20 - 5 + 1 = 16 vecteurs par son
 
 
 def write_logmels(folder: Path, n: int, seed: int = 0) -> None:
-    """n log-mel factices (128, N_TRAMES) en dB dans folder."""
+    """n log-mel factices (128, N_TRAMES) en dB dans folder, de machines id_00 et id_02 en alternance."""
     folder.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
     for i in range(n):
-        np.save(folder / f"normal_id_00_{i:08d}.npy", rng.normal(-30, 10, (128, N_TRAMES)).astype(np.float32))
+        np.save(folder / f"normal_id_{i % 2 * 2:02d}_{i:08d}.npy", rng.normal(-30, 10, (128, N_TRAMES)).astype(np.float32))
 
 
 @pytest.fixture
@@ -36,11 +36,12 @@ def fake_data(tmp_path) -> Path:
     return root
 
 
-def small_config(output_dir, epochs: int = 1) -> dict:
-    """Config réelle allégée pour des tests rapides sur CPU, avec les données de la fixture fake_data."""
+def small_config(output_dir, epochs: int = 1, model: str = "ae") -> dict:
+    """Config réelle (configs/<model>.yaml) allégée pour des tests rapides sur CPU, avec les données de la
+    fixture fake_data."""
     from utils import load_config
 
-    cfg = load_config(CONFIG_DIR / "ae.yaml")
+    cfg = load_config(CONFIG_DIR / f"{model}.yaml")
     cfg["output_dir"] = str(output_dir)
     cfg["device"] = "cpu"
     cfg["data"].update(root=str(Path(output_dir) / "data"), batch_size=8)

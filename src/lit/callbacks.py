@@ -21,23 +21,23 @@ def log_image(trainer: pl.Trainer, tag: str, grid: torch.Tensor, step: int) -> N
 
 class ReconstructionImages(pl.Callback):
     """À chaque validation : spectrogramme log-mel du début de la validation (en haut) et sa reconstruction
-    (en bas). Chaque colonne est la première trame d'un vecteur : on retrouve le spectrogramme du son."""
+    (en bas). Chaque colonne est la première trame d'un vecteur : on retrouve le spectrogramme du son.
+    Si la validation contient les ids des machines, ils sont passés au modèle."""
 
     def __init__(self, n_vectors: int = 300, n_mels: int = 128):
         self.n_vectors = n_vectors
         self.n_mels = n_mels
-        self.vectors: torch.Tensor | None = None
+        self.batch: list[torch.Tensor] | None = None
 
     def on_fit_start(self, trainer, pl_module):
-        tensors = trainer.datamodule.val_ds.tensors[0]
-        self.vectors = tensors[: self.n_vectors]
+        self.batch = [t[: self.n_vectors] for t in trainer.datamodule.val_ds.tensors]  # vecteurs (et ids)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking or self.vectors is None:
+        if trainer.sanity_checking or self.batch is None:
             return
-        x = self.vectors.to(pl_module.device)
+        x, *ids = [t.to(pl_module.device) for t in self.batch]
         with torch.no_grad():
-            rec = pl_module(x)
+            rec = pl_module(x, *ids)
         both = torch.cat([x[:, : self.n_mels].T.flip(0), rec[:, : self.n_mels].T.flip(0)])  # (2 * n_mels, T)
         log_image(trainer, "reconstructions", _to_image(both), trainer.current_epoch)
 
