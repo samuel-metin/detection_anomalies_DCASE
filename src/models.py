@@ -9,7 +9,7 @@ Architecture de la baseline (Koizumi et al., 2020), sur des vecteurs de 640 vale
 
 Interface (callbacks d'entraînement, notebook d'évaluation) :
 - `encode(x)` renvoie le code latent ;
-- `forward(x)` vaut `decode(encode(x))` : la reconstruction ;
+- `forward(x, ids=None)` vaut `decode(encode(x))` : la reconstruction ;
 - `error(x, ids=None)` renvoie l'erreur de chaque vecteur, de forme (B,) : la perte d'entraînement est sa moyenne
   et le score d'anomalie d'un son est sa moyenne sur les vecteurs du son. `ids` (numéro de machine, id_04 -> 4)
   sert aux modèles qui en ont besoin ; l'AE l'ignore.
@@ -75,8 +75,8 @@ class AE(nn.Module):
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         return self.decoder(z)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.decode(self.encode(x))
+    def forward(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+        return self.decode(self.encode(x))  # ids ignorés : même interface que les modèles conditionnés
 
     def error(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
         """MSE de reconstruction de chaque vecteur (B,), comme la baseline."""
