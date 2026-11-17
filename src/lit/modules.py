@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import lightning.pytorch as pl
 import torch
-from torch import nn
 
 from models import build_autoencoder
 
 
 class AutoencoderModule(pl.LightningModule):
-    """AE : MSE de reconstruction, Adam.
+    """Auto-encodeur : perte = moyenne de `model.error` (MSE de reconstruction pour l'AE), Adam.
 
     Métriques TensorBoard : loss/train_step, loss/train_epoch, loss/val.
     """
@@ -20,14 +19,18 @@ class AutoencoderModule(pl.LightningModule):
         self.save_hyperparameters()  # config complète -> hparams TensorBoard + checkpoint
         self.config = config
         self.model = build_autoencoder(config["model"])
-        self.criterion = nn.MSELoss()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
+    def on_fit_start(self):
+        # Statistiques calculées une fois sur tout le train (normalisation…), pour les modèles qui en ont besoin
+        if hasattr(self.model, "fit_stats"):
+            self.model.fit_stats(self.trainer.datamodule.train_ds.tensors[0].to(self.device))
+
     def _loss(self, batch, stage: str) -> tuple[torch.Tensor, int]:
-        x = batch[0]
-        return self.criterion(self.model(x), x), x.size(0)
+        # batch = (vecteurs,) ou (vecteurs, ids) : error() renvoie l'erreur de chaque vecteur
+        return self.model.error(*batch).mean(), batch[0].size(0)
 
     def training_step(self, batch, batch_idx):
         loss, bs = self._loss(batch, "train")

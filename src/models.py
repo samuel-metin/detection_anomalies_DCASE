@@ -7,7 +7,13 @@ Architecture de la baseline (Koizumi et al., 2020), sur des vecteurs de 640 vale
 
 Interface (callbacks d'entraînement, notebook d'évaluation) :
 - `encode(x)` renvoie le code latent ;
-- `forward(x)` vaut `decode(encode(x))` : la reconstruction.
+- `forward(x)` vaut `decode(encode(x))` : la reconstruction ;
+- `error(x, ids=None)` renvoie l'erreur de chaque vecteur, de forme (B,) : la perte d'entraînement est sa moyenne
+  et le score d'anomalie d'un son est sa moyenne sur les vecteurs du son. `ids` (numéro de machine, id_04 -> 4)
+  sert aux modèles qui en ont besoin ; l'AE l'ignore.
+
+Un modèle peut aussi définir `fit_stats(x_train)`, appelé une fois avant l'entraînement avec tous les vecteurs
+d'entraînement (par exemple pour des statistiques de normalisation rangées dans des buffers).
 """
 
 from __future__ import annotations
@@ -70,16 +76,19 @@ class AE(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.decode(self.encode(x))
 
+    def error(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+        """MSE de reconstruction de chaque vecteur (B,), comme la baseline."""
+        return ((self(x) - x) ** 2).mean(dim=1)
+
 
 MODELS = {"ae": AE}
 MODEL_NAMES = tuple(MODELS)
 
 
-def build_autoencoder(model_cfg: dict) -> AE:
-    """Modèle décrit par la section `model` de la config."""
+def build_autoencoder(model_cfg: dict) -> nn.Module:
+    """Modèle décrit par la section `model` de la config : les autres clés que `name` sont passées au
+    constructeur."""
     name = model_cfg["name"]
     if name not in MODELS:
         raise ValueError(f"Auto-encodeur inconnu : {name!r} (choix : {list(MODELS)})")
-    return MODELS[name](input_shape=model_cfg.get("input_shape", 640),
-                        hidden_shapes=model_cfg.get("hidden_shapes", [128, 128, 128, 128]),
-                        latent_shape=model_cfg.get("latent_shape", 8))
+    return MODELS[name](**{k: v for k, v in model_cfg.items() if k != "name"})
