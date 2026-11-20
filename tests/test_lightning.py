@@ -84,17 +84,16 @@ def test_model_pt_reloads_without_lightning(fake_data, tmp_path):
         assert torch.allclose(model.eval()(x), result.module.model.cpu().eval()(x))
 
 
-def test_fit_cae_with_ids(fake_data, tmp_path):
-    cfg = small_config(tmp_path, model="cae")
+def test_fit_nnae_saves_memory(fake_data, tmp_path):
+    cfg = small_config(tmp_path, model="nnae")
     dm = FeatureDataModule(cfg["data"])
     dm.setup("fit")
-    vectors, ids = next(iter(dm.train_dataloader()))
-    assert vectors.shape == (8, 640) and ids.shape == (8,)
+    assert len(next(iter(dm.train_dataloader()))) == 3  # (vecteurs, ids, sons)
     result = fit(cfg, run_name="t")
-    assert "reconstructions" in _event_tags(result.run_dir)[1]
     ckpt = torch.load(result.run_dir / "checkpoints" / "model.pt", weights_only=True)
     model = build_autoencoder(ckpt["config"]["model"])
     model.load_state_dict(ckpt["model_state"])
+    assert model.memory_filled.tolist() == [True, False, True] + [False] * 5
     x, ids = torch.randn(2, 640), torch.tensor([0, 2])
     with torch.no_grad():
         assert torch.allclose(model.eval()(x, ids), result.module.model.cpu().eval()(x, ids))

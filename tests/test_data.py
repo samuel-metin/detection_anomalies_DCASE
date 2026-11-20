@@ -60,3 +60,9 @@ def test_get_train_val_with_ids(fake_data):
     assert x.shape == (64, 640) and ids.dtype == torch.long
     assert ids.tolist() == [0] * 32 + [2] * 32  # 2 sons de chaque machine, dans l'ordre des fichiers
     assert torch.equal(x, get_train_val({"root": str(fake_data)})[0].tensors[0])
+
+
+def test_get_train_val_with_sounds(fake_data):
+    train, _ = get_train_val({"root": str(fake_data), "with_ids": True, "with_sounds": True})
+    x, ids, sounds = train.tensors
+    assert sounds.tolist() == [i for i in range(4) for _ in range(16)]  # 4 sons de 16 vecteurs

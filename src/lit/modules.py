@@ -28,8 +28,20 @@ class AutoencoderModule(pl.LightningModule):
         if hasattr(self.model, "fit_stats"):
             self.model.fit_stats(self.trainer.datamodule.train_ds.tensors[0].to(self.device))
 
+    def _build_memory(self):
+        # Modèles à mémoire d'exemples normaux (nnae) : codes recalculés avec l'encodeur courant
+        if hasattr(self.model, "build_memory"):
+            x, ids = self.trainer.datamodule.train_ds.tensors[:2]
+            self.model.build_memory(x, ids)
+
+    def on_validation_epoch_start(self):
+        self._build_memory()
+
+    def on_fit_end(self):
+        self._build_memory()  # mémoire des poids finaux, enregistrée dans model.pt
+
     def _loss(self, batch, stage: str) -> tuple[torch.Tensor, int]:
-        # batch = (vecteurs,) ou (vecteurs, ids) : error() renvoie l'erreur de chaque vecteur
+        # batch = (vecteurs,), (vecteurs, ids) ou (vecteurs, ids, sons) : erreur de chaque vecteur
         return self.model.error(*batch).mean(), batch[0].size(0)
 
     def training_step(self, batch, batch_idx):

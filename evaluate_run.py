@@ -6,11 +6,11 @@ de validation. Écrit ensuite :
 - results/summary.md : résumé du dernier run évalué (20 lignes au plus), remplacé à chaque appel ;
 - results/historique.md : une ligne par run (run, changement testé, AUC, pAUC, conclusion), ajoutée à la fin.
 
-L'analyse détaillée (autres scores, figures, écoute) reste dans notebooks/evaluation.ipynb.
+L'analyse détaillée (figures, matrice de confusion, écoute) est dans notebooks/nnae_experience.ipynb.
 
 Exemples :
     python evaluate_run.py outputs/ae/pump --change "baseline du papier"
-    python evaluate_run.py outputs/cae/cae/checkpoints/model.pt --change "cae, 30 epochs"
+    python evaluate_run.py outputs/nnae/nnae/checkpoints/model.pt --change "nnae, 10 epochs"
 """
 
 from __future__ import annotations

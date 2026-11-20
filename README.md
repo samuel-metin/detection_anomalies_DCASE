@@ -13,11 +13,11 @@ Condition Monitoring*) :
 2. `train.py` entraîne l'auto-encodeur (AE) de la baseline sur les sons normaux, et sauvegarde le modèle ;
 3. `evaluate_run.py` écrit un résumé court du run (AUC / pAUC par machine) dans `results/summary.md` et une
    ligne dans `results/historique.md` ;
-4. le notebook `notebooks/evaluation.ipynb` calcule les métriques du papier (AUC et pAUC par machine) sur le jeu
-   de test, des scores plus performants (`maha`, `knn`), et permet d'écouter et d'examiner n'importe quel son.
+4. le notebook `notebooks/nnae_experience.ipynb` résume l'expérience du `nnae` de bout en bout : données,
+   modèle, entraînement, AUC / pAUC par machine sur le test, matrice de confusion, erreurs restantes à écouter.
 
-En plus de la baseline (`ae`), le projet propose un auto-encodeur **conditionné par l'ID de la machine** (`cae`),
-voir [Améliorations](#améliorations).
+En plus de la baseline (`ae`), le projet propose un auto-encodeur **à plus proche voisin** (`nnae`), qui
+reconstruit en s'appuyant sur de vrais exemples normaux, voir [Auto-encodeur à plus proche voisin](#auto-encodeur-à-plus-proche-voisin-nnae).
 
 ## Données
 
@@ -64,29 +64,40 @@ machine) et contient son log-mel `(128 bandes, 313 trames)`.
 normalisation « slaney ») ; la validation est un tirage aléatoire de 10 % des **sons** (la baseline Keras prend
 les 10 derniers % des vecteurs, donc presque uniquement la dernière machine).
 
-## Améliorations
+## Auto-encodeur à plus proche voisin (`nnae`)
 
-| Modèle | Score | AUC | pAUC |
-|--------|-------|-----|------|
-| `ae` (baseline, 100 epochs) | `mse` (papier) | 72.85 | 59.41 |
-| `ae` (baseline, 100 epochs) | `maha` | 85.3 | 65.8 |
-| `cae` (30 epochs) | `mse` | 76.1 | 65.4 |
-| **`cae` (30 epochs)** | **`maha`** | **87.1** | **71.3** |
+Un auto-encodeur généralise parfois trop : il reconstruit assez bien un son anormal, qui passe alors inaperçu.
+Le `nnae` (`configs/nnae.yaml`) oblige le décodeur à s'appuyer sur de vrais exemples normaux : il reçoit
 
-Pompe, moyenne des 4 machines. Lignes `cae` : moyenne de deux entraînements (seeds 0 et 1), très proches
-(`maha` : 87.0 et 87.2 d'AUC).
+    z_mix = alpha · z + (1 − alpha) · z_voisin        (alpha = 0.5)
 
-- **`cae`** (`configs/cae.yaml`) : l'AE de la baseline, dont le décodeur reçoit le code latent concaténé au
-  one-hot de l'ID de la machine (id_04 -> 4). Un seul modèle pour toutes les machines, mais il sait de laquelle
-  vient le son. Les ID sont lus dans le nom des fichiers (`data.with_ids: true`).
-- **`maha`** (notebook) : distance de Mahalanobis du vecteur d'erreur moyen `x - x̂` d'un son à ceux des sons
-  normaux d'entraînement de la même machine. **`knn`** : distance au plus proche son d'entraînement dans l'espace
-  latent. Ces scores ont été choisis en regardant le test de la pompe : leur gain reste à confirmer ailleurs.
-- Chaque run est résumé par `evaluate_run.py` dans `results/summary.md` et `results/historique.md`.
+où `z` est le code du vecteur et `z_voisin` le code le plus proche parmi des sons normaux **de la même machine**.
+Un son normal a un voisin proche, donc `z_mix ≈ z` et il est bien reconstruit ; un son anormal n'en a pas : sa
+reconstruction est tirée vers du normal et son erreur augmente.
+
+- **Entraînement** : le voisin est cherché dans le batch, parmi les vecteurs **d'autres sons** de la même machine
+  (sinon ce serait le vecteur lui-même, ou un vecteur presque identique du même son). Les batchs contiennent pour
+  cela l'ID de la machine et le numéro du son (`data.with_ids`, `data.with_sounds`).
+- **Évaluation** : le voisin est cherché dans une mémoire de 128 codes par machine (`memory_size`), tirés des
+  sons d'entraînement et recalculés avant chaque validation. Elle est enregistrée dans `model.pt`.
+- Encodeur, goulot de 8 et décodeur sont ceux de la baseline ; l'ID ne sert qu'à choisir les voisins.
+
+| Modèle | AUC | pAUC |
+|--------|-----|------|
+| `ae` (baseline, 100 epochs) | 72.85 | 59.41 |
+| `ae` (baseline, 15 epochs) | 72.62 | 59.62 |
+| `nnae`, alpha 0.5 (10 epochs) | 72.00 | 60.20 |
+| `nnae`, alpha 0.25 (10 epochs) | 74.99 | 64.28 |
+| `nnae`, alpha 0.1 (10 epochs) | 76.02 | 64.78 |
+| `nnae`, alpha 0 (10 epochs) | 71.96 | 61.42 |
+| `nnae`, alpha 0.1 (30 epochs) | 75.74 | 62.68 |
+
+Pompe, score du papier (erreur moyenne), moyenne des 4 machines. Chaque run est résumé par `evaluate_run.py`
+dans `results/summary.md` et `results/historique.md`.
 
 ```bash
-python train.py --config configs/cae.yaml --epochs 30 --run-name cae
-python evaluate_run.py outputs/cae/cae --change "cae, 30 epochs"
+python train.py --config configs/nnae.yaml --epochs 10 --run-name nnae
+python evaluate_run.py outputs/nnae/nnae --change "nnae, 10 epochs"
 ```
 
 ## Installation
@@ -164,19 +175,13 @@ model.load_state_dict(ckpt["model_state"])
 
 ## Évaluation
 
-Le notebook `notebooks/evaluation.ipynb` charge un `model.pt` (par défaut le plus récent de `outputs/`), lit les
-log-mel de `val/` et `test/` du jeu de données de sa config, et analyse la détection :
-
-- scores par son : `mse`, erreur de reconstruction moyenne (score du papier), et `maha` / `knn`, estimés sur les
-  sons normaux de `train/` par machine ;
-- **AUC** et **pAUC** par machine et en moyenne, à côté des résultats de la baseline officielle ;
-- courbes ROC, distribution des scores ; en complément, rappel et faux positifs au seuil (quantile des scores de
-  validation) ;
-- `show(...)` : log-mel, reconstruction et carte d'erreur d'un son, avec un lecteur audio pour l'écouter ; sons
-  les plus suspects, anomalies manquées, fausses alertes ;
-- tester ses propres sons : sons du test choisis par leur nom, sons modifiés (bruit, sifflement, chocs…), ou un
-  fichier WAV quelconque ;
-- espace latent (ACP) par machine.
+- `python evaluate_run.py outputs/<modèle>/<run> --change "..."` : AUC / pAUC par machine d'un run entraîné
+  (score du papier : erreur de reconstruction moyenne d'un son), seuil au quantile 95 % des scores de validation,
+  résumé dans `results/summary.md` et une ligne dans `results/historique.md`.
+- `notebooks/nnae_experience.ipynb` : notebook autonome et court, qui réécrit en clair le dataset, le `nnae` et
+  la boucle d'entraînement (PyTorch, sans Lightning), entraîne 10 epochs (alpha 0.1), puis affiche la courbe des
+  pertes, l'AUC et la pAUC par machine à côté du papier, la matrice de confusion au seuil (quantile 95 % de la
+  validation), et des faux positifs et faux négatifs à écouter. Il retrouve 76.02 AUC / 64.78 pAUC.
 
 Dans VS Code, choisir le noyau `.venv`.
 
@@ -187,10 +192,10 @@ Dans VS Code, choisir le noyau `.venv`.
 ├── prepare_data.py      # sons WAV -> log-mel (.npy) rangés en train / val / test
 ├── train.py             # script d'entraînement (CLI)
 ├── evaluate_run.py      # résumé d'un run -> results/summary.md, results/historique.md
-├── configs/             # ae.yaml (baseline), cae.yaml (conditionné par l'ID)
+├── configs/             # ae.yaml (baseline), nnae.yaml (à plus proche voisin)
 ├── src/
 │   ├── data.py          # log-mel et vecteurs de 5 trames (réglages du papier), lecture des .npy
-│   ├── models.py        # Encoder, Decoder, AE de la baseline, CAE
+│   ├── models.py        # Encoder, Decoder, AE de la baseline, NNAE
 │   ├── lit/             # entraînement Lightning
 │   │   ├── datamodule.py    # FeatureDataModule (train, validation)
 │   │   ├── modules.py       # AutoencoderModule
@@ -199,8 +204,8 @@ Dans VS Code, choisir le noyau `.venv`.
 │   └── utils.py         # config YAML et overrides
 ├── tests/               # tests unitaires (pytest)
 ├── notebooks/
-│   └── evaluation.ipynb # évaluation : métriques du papier, figures, écoute et test de sons
-├── results/             # summary.md, historique.md, rapport_final.md
+│   └── nnae_experience.ipynb  # l'expérience nnae de bout en bout : données, modèle, AUC, erreurs
+├── results/             # summary.md (dernier run), historique.md (un run par ligne)
 ├── data/                # dcase2020/ (sons) et log-mel par machine (non versionnés)
 └── outputs/             # runs d'entraînement (non versionnés)
 ```
@@ -213,7 +218,7 @@ pytest
 
 Les tests n'utilisent que des données factices (sons et log-mel aléatoires). Ils ne téléchargent rien et
 tournent sur CPU en quelques secondes. Ils couvrent les features (log-mel, vecteurs de 5 trames), la
-construction du jeu de données, l'architecture de la baseline et du `cae`, la config, l'entraînement Lightning
+construction du jeu de données, l'architecture de la baseline et du `nnae` (choix des voisins, mémoire), la config, l'entraînement Lightning
 (logs TensorBoard, checkpoints, `model.pt`), `train.py` et `evaluate_run.py` de bout en bout.
 
 ## Pistes

@@ -4,7 +4,7 @@
 - `to_vectors` : 5 trames consécutives concaténées -> vecteurs de 640 valeurs, l'entrée des modèles ;
 - `get_train_val` : vecteurs de <root>/train/normal/*.npy et <root>/val/normal/*.npy (créés par
   prepare_data.py), et avec `with_ids: true` le numéro de machine de chaque vecteur (pour les modèles
-  conditionnés par l'ID). Le dossier test/ sert à l'évaluation, dans notebooks/evaluation.ipynb.
+  conditionnés par l'ID). Le dossier test/ sert à l'évaluation (evaluate_run.py, notebook).
 """
 
 from __future__ import annotations
@@ -66,10 +66,11 @@ def machine_id(name: str) -> int:
     return int(match.group(1))
 
 
-def load_vectors(folder: str | Path, n_frames: int = N_FRAMES,
-                 with_ids: bool = False) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+def load_vectors(folder: str | Path, n_frames: int = N_FRAMES, with_ids: bool = False,
+                 with_sounds: bool = False) -> torch.Tensor | tuple[torch.Tensor, ...]:
     """Vecteurs de tous les log-mel (.npy) d'un dossier, mis bout à bout, dans l'ordre des fichiers.
-    Avec with_ids : (vecteurs, ids), ids = numéro de machine de chaque vecteur (entiers longs)."""
+    Avec with_ids : (vecteurs, ids), ids = numéro de machine de chaque vecteur (entiers longs) ; avec en plus
+    with_sounds : (vecteurs, ids, sons), sons = numéro du son (fichier) d'où vient chaque vecteur."""
     paths = sorted(Path(folder).glob("*.npy"))
     if not paths:
         raise ConfigError(f"aucun fichier .npy dans {folder} : créer le jeu de données avec python prepare_data.py")
@@ -77,18 +78,23 @@ def load_vectors(folder: str | Path, n_frames: int = N_FRAMES,
     if not with_ids:
         return torch.cat(vectors)
     ids = [torch.full((len(v),), machine_id(p.stem), dtype=torch.long) for p, v in zip(paths, vectors)]
-    return torch.cat(vectors), torch.cat(ids)
+    if not with_sounds:
+        return torch.cat(vectors), torch.cat(ids)
+    sounds = [torch.full((len(v),), i, dtype=torch.long) for i, v in enumerate(vectors)]
+    return torch.cat(vectors), torch.cat(ids), torch.cat(sounds)
 
 
 def get_train_val(data_cfg: dict) -> tuple[TensorDataset, TensorDataset]:
     """(train, val) depuis la section `data` de la config : vecteurs de <root>/train/normal et <root>/val/normal.
-    Un batch vaut (vecteurs,), ou (vecteurs, ids) avec `with_ids: true` (modèles conditionnés par l'ID)."""
+    Un batch vaut (vecteurs,), ou (vecteurs, ids) avec `with_ids: true` (modèles conditionnés par l'ID), ou
+    (vecteurs, ids, sons) avec en plus `with_sounds: true` (nnae : voisins pris dans d'autres sons)."""
     root = Path(data_cfg.get("root", "data/pump"))
     n_frames = data_cfg.get("n_frames", N_FRAMES)
     with_ids = data_cfg.get("with_ids", False)
+    with_sounds = data_cfg.get("with_sounds", False)
 
     def dataset(folder: Path) -> TensorDataset:
-        tensors = load_vectors(folder, n_frames, with_ids)
+        tensors = load_vectors(folder, n_frames, with_ids, with_sounds)
         return TensorDataset(*tensors) if with_ids else TensorDataset(tensors)
 
     return dataset(root / "train" / "normal"), dataset(root / "val" / "normal")

@@ -1,9 +1,9 @@
-"""Architecture de l'AE de la baseline et de l'AE conditionné par l'ID (CAE) : formes et passes forward."""
+"""Architecture de l'AE de la baseline et de l'AE à plus proche voisin (NNAE) : formes et passes forward."""
 
 import pytest
 import torch
 
-from models import AE, CAE, Decoder, Encoder, build_autoencoder
+from models import AE, NNAE, Decoder, Encoder, build_autoencoder
 
 HIDDEN = [128, 128, 128, 128]
 
@@ -49,20 +49,35 @@ def test_build_autoencoder_unknown_name():
         build_autoencoder({"name": "inconnu"})
 
 
+def test_nnae_neighbour_from_another_sound_of_same_machine():
+    model = NNAE(640, [32, 16], 4).train()
+    z = torch.tensor([[0.0, 0, 0, 0], [0.1, 0, 0, 0], [5.0, 0, 0, 0], [0.2, 0, 0, 0]])
+    ids = torch.tensor([0, 0, 0, 2])
+    sounds = torch.tensor([0, 0, 1, 2])
+    # vecteurs 0 et 1 (même son) : seul le vecteur 2 est permis (le 3 est d'une autre machine) ; vecteur 3 : seul
+    # de sa machine -> lui-même
+    assert torch.equal(model.neighbours(z, ids, sounds), z[[2, 2, 1, 3]])
+    assert torch.equal(model.neighbours(z, ids), z[[1, 0, 1, 3]])  # sans sons : seul le vecteur lui-même est exclu
 
-IDS = torch.tensor([0, 2, 4, 6, 0, 2, 4, 6])
 
-
-def test_cae_uses_machine_id(batch):
-    model = CAE(640, [32, 16], 4).eval()
+def test_nnae_memory(batch):
+    model = NNAE(640, [32, 16], 4, alpha=0.5, memory_size=4)
+    model.build_memory(torch.randn(10, 640), torch.tensor([0] * 6 + [2] * 4))
+    assert model.training and model.memory_filled.tolist() == [True, False, True] + [False] * 5
+    model.eval()
     with torch.no_grad():
-        assert model(batch, IDS).shape == (8, 640)
-        assert torch.allclose(model(batch), model(batch, torch.zeros(8, dtype=torch.long)))  # sans ids : ID 0
-        assert not torch.allclose(model(batch, IDS), model(batch, IDS + 1))
-        assert torch.allclose(model.error(batch, IDS), ((model(batch, IDS) - batch) ** 2).mean(dim=1))
-        assert model(batch[:1], IDS[:1]).shape == (1, 640)
+        ids = torch.tensor([0, 2, 4, 6, 0, 2, 4, 6])
+        z = model.encode(batch)
+        mixed = model.neighbours(z, ids)
+        assert torch.equal(mixed[[2, 3]], z[[2, 3]])  # id 4 et 6 absents de la mémoire : pas de mélange
+        assert all(any(torch.equal(mixed[i], m) for m in model.memory[ids[i]]) for i in (0, 1))
+        assert model(batch[:1], ids[:1]).shape == (1, 640)
+        assert torch.allclose(model.error(batch, ids), ((model(batch, ids) - batch) ** 2).mean(dim=1))
+        model.alpha = 1.0  # sans mélange : l'AE
+        assert torch.allclose(model(batch, ids), model.decode(z))
 
 
-def test_build_cae():
-    model = build_autoencoder({"name": "cae", "hidden_shapes": [64, 32], "latent_shape": 4})
-    assert type(model) is CAE and model.decoder.hidden[0].in_features == 4 + 8
+def test_build_nnae():
+    model = build_autoencoder({"name": "nnae", "hidden_shapes": [64, 32], "latent_shape": 4})
+    assert type(model) is NNAE and model.decoder.hidden[0].in_features == 4  # pas d'ID dans le décodeur
+    assert model.memory.shape == (8, 128, 4)

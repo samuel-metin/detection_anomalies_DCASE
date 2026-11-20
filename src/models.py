@@ -5,14 +5,14 @@ Architecture de la baseline (Koizumi et al., 2020), sur des vecteurs de 640 vale
     code    : 128 -> 8                              (Linear, BatchNorm, ReLU)
     Decoder : 8 -> 128 -> 128 -> 128 -> 128 -> 640  (Linear, BatchNorm, ReLU ; sortie linéaire)
 
-`CAE` : même AE, dont le décodeur reçoit aussi l'ID de la machine (config `data.with_ids: true`).
+`NNAE` : même AE, dont le décodeur reçoit le code mélangé à celui du plus proche exemple normal de la même machine.
 
 Interface (callbacks d'entraînement, notebook d'évaluation) :
 - `encode(x)` renvoie le code latent ;
 - `forward(x, ids=None)` vaut `decode(encode(x))` : la reconstruction ;
 - `error(x, ids=None)` renvoie l'erreur de chaque vecteur, de forme (B,) : la perte d'entraînement est sa moyenne
   et le score d'anomalie d'un son est sa moyenne sur les vecteurs du son. `ids` (numéro de machine, id_04 -> 4)
-  sert aux modèles qui en ont besoin ; l'AE l'ignore.
+  sert aux modèles qui en ont besoin (nnae : voisins de la même machine) ; l'AE l'ignore.
 
 Un modèle peut aussi définir `fit_stats(x_train)`, appelé une fois avant l'entraînement avec tous les vecteurs
 d'entraînement (par exemple pour des statistiques de normalisation rangées dans des buffers).
@@ -83,32 +83,72 @@ class AE(nn.Module):
         return ((self(x) - x) ** 2).mean(dim=1)
 
 
-class CAE(AE):
-    """Auto-encodeur conditionné par l'ID de la machine (idée de Kapka, 2020) : un seul modèle pour toutes les
-    machines, mais le décodeur sait de quelle machine vient le son. Encodeur et goulot identiques à l'AE ; le
-    décodeur reçoit le code latent concaténé au one-hot de l'ID (id_04 -> 4). Sans ids, l'ID 0 est utilisé.
+class NNAE(AE):
+    """AE qui reconstruit en s'appuyant sur de vrais exemples normaux : le décodeur reçoit
+    z_mix = alpha * z + (1 - alpha) * z_ppv, où z_ppv est le code le plus proche de z parmi des sons normaux de la
+    même machine. Un son normal a un voisin proche (z_mix ≈ z) ; un son anormal non : sa reconstruction est tirée
+    vers du normal et son erreur augmente.
+
+    - entraînement : voisins pris dans le batch, parmi les vecteurs d'autres sons (`sounds`, config
+      `data.with_sounds: true`) de la même machine ; le gradient passe aussi par le code du voisin ;
+    - évaluation (mode eval) : voisins pris dans une mémoire de `memory_size` codes par machine (vecteurs
+      d'entraînement tirés au hasard, toujours les mêmes), recalculée par `build_memory` avant chaque validation
+      et à la fin de l'entraînement : elle est rangée dans model.pt. Machine absente de la mémoire : pas de mélange.
+    Encodeur, goulot et décodeur sont ceux de l'AE de la baseline ; l'ID ne sert qu'à choisir les voisins (sans
+    ids : ID 0, toutes les machines ensemble).
     """
 
     def __init__(self, input_shape: int = 640, hidden_shapes: Sequence[int] = (128, 128, 128, 128),
-                 latent_shape: int = 8, n_ids: int = 8):
+                 latent_shape: int = 8, n_ids: int = 8, alpha: float = 0.5, memory_size: int = 128):
         super().__init__(input_shape, hidden_shapes, latent_shape)
-        self.n_ids = n_ids
-        self.decoder = Decoder(latent_shape + n_ids, list(hidden_shapes), input_shape)
+        self.alpha = alpha
+        self.memory_size = memory_size
+        self.register_buffer("memory", torch.zeros(n_ids, memory_size, latent_shape))
+        self.register_buffer("memory_filled", torch.zeros(n_ids, dtype=torch.bool))
 
-    def decode(self, z: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
+    @torch.no_grad()
+    def build_memory(self, x_train: torch.Tensor, ids_train: torch.Tensor, seed: int = 0) -> None:
+        """Mémoire : codes de `memory_size` vecteurs d'entraînement par machine, tirés au hasard (graine fixe)."""
+        was_training = self.training
+        self.eval()
+        generator = torch.Generator().manual_seed(seed)
+        ids_train = ids_train.cpu()
+        self.memory_filled.zero_()
+        for mid in ids_train.unique().tolist():
+            rows = (ids_train == mid).nonzero().squeeze(1)
+            rows = rows[torch.randperm(len(rows), generator=generator)[: self.memory_size]]
+            codes = self.encode(x_train[rows.to(x_train.device)].to(self.memory.device))
+            self.memory[mid] = codes[torch.arange(self.memory_size) % len(codes)]  # répété si trop peu de vecteurs
+            self.memory_filled[mid] = True
+        self.train(was_training)
+
+    def neighbours(self, z: torch.Tensor, ids: torch.Tensor, sounds: torch.Tensor | None = None) -> torch.Tensor:
+        """Code du plus proche exemple normal de la même machine, pour chaque code de z (z lui-même à défaut)."""
+        if self.training:  # dans le batch, hors du son lui-même (hors du vecteur lui-même sans `sounds`)
+            same = sounds if sounds is not None else torch.arange(len(z), device=z.device)
+            invalid = (ids[:, None] != ids[None, :]) | (same[:, None] == same[None, :])
+            dist = torch.cdist(z.detach(), z.detach()).masked_fill(invalid, float("inf"))
+            best, j = dist.min(dim=1)
+            return torch.where(torch.isinf(best)[:, None], z, z[j])
+        memory = self.memory[ids]  # (B, memory_size, latent)
+        j = ((memory - z[:, None]) ** 2).sum(dim=2).argmin(dim=1)
+        return torch.where(self.memory_filled[ids][:, None], memory[torch.arange(len(z)), j], z)
+
+    def forward(self, x: torch.Tensor, ids: torch.Tensor | None = None,
+                sounds: torch.Tensor | None = None) -> torch.Tensor:
+        z = self.encode(x)
         if ids is None:
             ids = torch.zeros(z.size(0), dtype=torch.long, device=z.device)
-        return self.decoder(torch.cat([z, nn.functional.one_hot(ids, self.n_ids).to(z.dtype)], dim=1))
+        z_mix = self.alpha * z + (1 - self.alpha) * self.neighbours(z, ids, sounds)
+        return self.decode(z_mix)
 
-    def forward(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
-        return self.decode(self.encode(x), ids)
-
-    def error(self, x: torch.Tensor, ids: torch.Tensor | None = None) -> torch.Tensor:
-        """MSE de reconstruction de chaque vecteur (B,), avec le vrai ID."""
-        return ((self(x, ids) - x) ** 2).mean(dim=1)
+    def error(self, x: torch.Tensor, ids: torch.Tensor | None = None,
+              sounds: torch.Tensor | None = None) -> torch.Tensor:
+        """MSE de reconstruction de chaque vecteur (B,), après mélange avec le plus proche voisin normal."""
+        return ((self(x, ids, sounds) - x) ** 2).mean(dim=1)
 
 
-MODELS = {"ae": AE, "cae": CAE}
+MODELS = {"ae": AE, "nnae": NNAE}
 MODEL_NAMES = tuple(MODELS)
 
 

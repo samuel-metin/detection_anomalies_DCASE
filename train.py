@@ -2,7 +2,7 @@
 
 Le modèle vient de model.name dans la config. Les log-mel sont lus dans <data.root>/train/normal/ et
 <data.root>/val/normal/ (créés par prepare_data.py). Tout est écrit dans outputs/<model>/<run>/ : logs
-TensorBoard, config et checkpoints. L'évaluation sur test/ se fait dans notebooks/evaluation.ipynb.
+TensorBoard, config et checkpoints. L'évaluation sur test/ se fait avec evaluate_run.py.
 
 Exemples :
     python train.py --config configs/ae.yaml
